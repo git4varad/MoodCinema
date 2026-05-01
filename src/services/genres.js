@@ -24,6 +24,8 @@ export const GENRE_MAP = {
   satire: 35,
   sports: 18,
   superhero: 28,
+  superhero_movie: [28, 878],
+  superhero_tv: [10759, 10765],
   survival: 53,
   teen: 18,
   thriller: 53,
@@ -32,3 +34,5 @@ export const GENRE_MAP = {
   western: 37,
   zombie: 27,
 }
+
+export const genreMap = GENRE_MAP

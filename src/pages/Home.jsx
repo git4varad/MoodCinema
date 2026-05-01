@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import MoodInput from '../components/MoodInput'
 import MovieRow from '../components/MovieRow'
+import { moodDevPicks } from '../services/devPicks'
 import { GENRE_MAP } from '../services/genres'
+import { hindiComedyIds, hindiPopularIds } from '../services/hindiPicks'
 import { detectMoodToGenre } from '../services/mood'
-import { fetchMoviesByGenre } from '../services/tmdb'
+import { fetchById, fetchMoviesByGenre } from '../services/tmdb'
 
 const INITIAL_ROWS = {
   enMovies: [],
@@ -30,10 +32,30 @@ function Home() {
   const [rows, setRows] = useState(INITIAL_ROWS)
   const [loadingRows, setLoadingRows] = useState(INITIAL_LOADING)
   const [rowErrors, setRowErrors] = useState(INITIAL_ERRORS)
+  const [devPicks, setDevPicks] = useState([])
+  const [extraHindiComedy, setExtraHindiComedy] = useState([])
+  const [extraHindiPopular, setExtraHindiPopular] = useState([])
+  const [activeGenres, setActiveGenres] = useState(['crime'])
+  const [currentMood, setCurrentMood] = useState('drama')
 
-  const loadRows = async (genre) => {
-    const genreId = GENRE_MAP[genre] || GENRE_MAP.drama
-    console.log('[MoodCinema] Selected genre:', genre)
+  const dedupeById = (items) => {
+    const unique = []
+    const seen = new Set()
+
+    for (const movie of items) {
+      if (!seen.has(movie.id)) {
+        seen.add(movie.id)
+        unique.push(movie)
+      }
+    }
+
+    return unique
+  }
+
+  const loadRows = useCallback(async (genresInput) => {
+    const genres = Array.isArray(genresInput) ? genresInput : [genresInput]
+    console.log('Selected Genres:', genres)
+
     setLoadingRows({
       enMovies: true,
       enTv: true,
@@ -42,20 +64,44 @@ function Home() {
     })
     setRowErrors(INITIAL_ERRORS)
 
-    const calls = [
-      fetchMoviesByGenre(genreId, 'movie', 'en'),
-      fetchMoviesByGenre(genreId, 'tv', 'en'),
-      fetchMoviesByGenre(genreId, 'movie', 'hi'),
-      fetchMoviesByGenre(genreId, 'tv', 'hi'),
-    ]
+    const getGenreIdsByType = (mediaType) => {
+      const ids = genres.flatMap((genre) => {
+        const typeSpecificKey = `${genre}_${mediaType}`
+        const mapped =
+          GENRE_MAP[typeSpecificKey] !== undefined
+            ? GENRE_MAP[typeSpecificKey]
+            : GENRE_MAP[genre]
 
-    const [enMovies, enTv, hiMovies, hiTv] = await Promise.allSettled(calls)
+        if (mapped === undefined) return []
+        return Array.isArray(mapped) ? mapped : [mapped]
+      })
+
+      const unique = [...new Set(ids)]
+      return unique.length > 0 ? unique : [GENRE_MAP.drama]
+    }
+
+    const fetchForRow = async (type, language) => {
+      const genreIds = getGenreIdsByType(type)
+      console.log(`Genre IDs (${type}/${language}):`, genreIds)
+      const results = await Promise.all(
+        genreIds.map((genreId) => fetchMoviesByGenre(genreId, type, language)),
+      )
+      const combined = results.flat()
+      return dedupeById(combined)
+    }
+
+    const [enMovies, enTv, hiMovies, hiTv] = await Promise.allSettled([
+      fetchForRow('movie', 'en'),
+      fetchForRow('tv', 'en'),
+      fetchForRow('movie', 'hi'),
+      fetchForRow('tv', 'hi'),
+    ])
 
     setRows({
-      enMovies: enMovies.status === 'fulfilled' ? enMovies.value.results || [] : [],
-      enTv: enTv.status === 'fulfilled' ? enTv.value.results || [] : [],
-      hiMovies: hiMovies.status === 'fulfilled' ? hiMovies.value.results || [] : [],
-      hiTv: hiTv.status === 'fulfilled' ? hiTv.value.results || [] : [],
+      enMovies: enMovies.status === 'fulfilled' ? enMovies.value : [],
+      enTv: enTv.status === 'fulfilled' ? enTv.value : [],
+      hiMovies: hiMovies.status === 'fulfilled' ? hiMovies.value : [],
+      hiTv: hiTv.status === 'fulfilled' ? hiTv.value : [],
     })
 
     setRowErrors({
@@ -67,30 +113,163 @@ function Home() {
     })
 
     setLoadingRows(INITIAL_LOADING)
-  }
+  }, [])
 
   const handleMoodSearch = (text) => {
-    const detected = detectMoodToGenre(text)
+    const detectedGenres = detectMoodToGenre(text)
+    const primaryMood = detectedGenres[0] || 'drama'
     console.log('[MoodCinema] Mood input:', text)
-    console.log('[MoodCinema] Detected genre:', detected)
-    loadRows(detected)
+    console.log('[MoodCinema] Detected genre:', detectedGenres)
+    setActiveGenres(detectedGenres)
+    setCurrentMood(primaryMood)
+    loadRows(detectedGenres)
   }
 
   useEffect(() => {
     const timerId = setTimeout(() => {
-      loadRows('crime')
+      setActiveGenres(['crime'])
+      setCurrentMood('crime')
+      loadRows(['crime'])
     }, 0)
 
     return () => clearTimeout(timerId)
+  }, [loadRows])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function loadDevPicks() {
+      if (!currentMood) return
+
+      try {
+        const picks = moodDevPicks[currentMood] || moodDevPicks.drama
+        if (!picks) return
+
+        const movies = await Promise.all(
+          picks.movies.map((id) => fetchById(id, 'movie')),
+        )
+        const tv = await Promise.all(picks.tv.map((id) => fetchById(id, 'tv')))
+
+        if (!ignore) {
+          const combined = [
+            ...movies.map((item) => ({ ...item, media_type: 'movie' })),
+            ...tv.map((item) => ({ ...item, media_type: 'tv' })),
+          ]
+          setDevPicks(combined)
+        }
+      } catch (error) {
+        console.error('[MoodCinema] Dev picks load failed:', error)
+        if (!ignore) {
+          setDevPicks([])
+        }
+      }
+    }
+
+    loadDevPicks()
+
+    return () => {
+      ignore = true
+    }
+  }, [currentMood])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function loadHindiExtras() {
+      try {
+        const comedy = await Promise.allSettled(
+          hindiComedyIds.map((id) => fetchById(id, 'movie')),
+        )
+        const popular = await Promise.allSettled(
+          hindiPopularIds.map((id) => fetchById(id, 'movie')),
+        )
+
+        const resolvedComedy = comedy
+          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
+          .map((entry) => ({ ...entry.value, media_type: 'movie' }))
+        const resolvedPopular = popular
+          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
+          .map((entry) => ({ ...entry.value, media_type: 'movie' }))
+
+        const mergedExtras = [...resolvedComedy, ...resolvedPopular]
+        console.log('[MoodCinema] Hindi curated fetched:', mergedExtras.length)
+
+        if (!ignore) {
+          setExtraHindiComedy(resolvedComedy)
+          setExtraHindiPopular(resolvedPopular)
+        }
+      } catch (error) {
+        console.error('[MoodCinema] Hindi curated picks load failed:', error)
+        if (!ignore) {
+          setExtraHindiComedy([])
+          setExtraHindiPopular([])
+        }
+      }
+    }
+
+    loadHindiExtras()
+
+    return () => {
+      ignore = true
+    }
   }, [])
 
+  const featured =
+    rows.enMovies[0] || rows.enTv[0] || rows.hiMovies[0] || rows.hiTv[0] || null
+  const existingIds = new Set([
+    ...rows.enMovies.map((m) => m.id),
+    ...rows.enTv.map((m) => m.id),
+    ...rows.hiMovies.map((m) => m.id),
+    ...rows.hiTv.map((m) => m.id),
+  ])
+  const uniqueDevPicks = devPicks.filter((item) => !existingIds.has(item.id))
+  const genreSet = new Set(activeGenres)
+  let moodHindiExtras = []
+  if (genreSet.has('comedy') || genreSet.has('feel-good')) {
+    moodHindiExtras = [...extraHindiComedy, ...extraHindiPopular.slice(0, 2)]
+  } else if (genreSet.has('drama') || genreSet.has('romance')) {
+    moodHindiExtras = [...extraHindiPopular, ...extraHindiComedy.slice(0, 2)]
+  } else if (
+    genreSet.has('action') ||
+    genreSet.has('thriller') ||
+    genreSet.has('crime') ||
+    genreSet.has('superhero')
+  ) {
+    moodHindiExtras = [...extraHindiPopular]
+  }
+
+  const combinedHindi = [...moodHindiExtras, ...rows.hiMovies]
+  const uniqueHindi = dedupeById(combinedHindi)
+  const finalHindiMovies = uniqueHindi.slice(0, 20)
+  const featuredTitle = featured?.title || featured?.name || 'MoodCinema Picks'
+  const featuredOverview =
+    featured?.overview || 'Discover curated titles picked based on your mood.'
+  const featuredBackdrop = featured?.backdrop_path
+    ? `https://image.tmdb.org/t/p/original${featured.backdrop_path}`
+    : null
+
   return (
-    <main className="mx-auto w-full max-w-7xl px-2 py-10">
-      <section className="mb-4 flex flex-col items-center px-2">
-        <h1 className="mb-6 text-center text-4xl font-bold text-white md:text-6xl">
-          What are you in the mood for?
-        </h1>
-        <MoodInput onSearch={handleMoodSearch} />
+    <main className="mx-auto w-full max-w-[1600px] pb-10">
+      <section className="relative h-[60vh] w-full overflow-hidden bg-neutral-950">
+        {featuredBackdrop ? (
+          <img
+            src={featuredBackdrop}
+            className="h-full w-full object-cover"
+            alt={featuredTitle}
+          />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-r from-neutral-900 to-neutral-800" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+        <div className="absolute bottom-10 left-6 right-6 md:left-10">
+          <h1 className="mb-3 text-4xl font-bold text-white md:text-5xl">
+            {featuredTitle}
+          </h1>
+          <p className="max-w-2xl text-sm text-gray-300 md:text-base">{featuredOverview}</p>
+          <div className="mt-5 max-w-2xl">
+            <MoodInput onSearch={handleMoodSearch} />
+          </div>
+        </div>
       </section>
 
       <MovieRow
@@ -107,7 +286,7 @@ function Home() {
       />
       <MovieRow
         title="Hindi Movies"
-        items={rows.hiMovies}
+        items={finalHindiMovies}
         loading={loadingRows.hiMovies}
         error={rowErrors.hiMovies}
       />
@@ -117,6 +296,15 @@ function Home() {
         loading={loadingRows.hiTv}
         error={rowErrors.hiTv}
       />
+      <section>
+        <MovieRow
+          title="⭐ Developer Picks for You"
+          items={uniqueDevPicks}
+          loading={false}
+          error=""
+        />
+        <p className="px-6 text-sm text-gray-400">Curated based on your mood</p>
+      </section>
     </main>
   )
 }

@@ -33,6 +33,10 @@ async function request(path, params = {}) {
   }
 }
 
+function shuffle(array) {
+  return [...array].sort(() => 0.5 - Math.random())
+}
+
 export async function fetchMoviesByGenre(
   genreId,
   type = 'movie',
@@ -43,19 +47,56 @@ export async function fetchMoviesByGenre(
     hi: 'en-US',
   }
   const endpoint = type === 'tv' ? '/discover/tv' : '/discover/movie'
-  const params = {
-    with_genres: genreId,
-    language: languageMap[language] || 'en-US',
-    sort_by: 'popularity.desc',
-    include_adult: false,
-    page: 1,
-  }
+  const genreParam = Array.isArray(genreId) ? genreId.join(',') : genreId
+  const randomPage = Math.floor(Math.random() * 10) + 1
+  const sort = 'popularity.desc'
+
+  console.log('Random Page:', randomPage)
+  console.log('Sort:', sort)
 
   if (language === 'hi') {
-    params.with_original_language = 'hi'
+    const primaryData = await request(endpoint, {
+      with_genres: genreParam,
+      with_original_language: 'hi',
+      region: 'IN',
+      sort_by: 'popularity.desc',
+      include_adult: false,
+      page: 1,
+      language: 'en-US',
+    })
+
+    if (!primaryData.results || primaryData.results.length === 0) {
+      const fallbackData = await request(endpoint, {
+        with_genres: genreParam,
+        with_original_language: 'hi',
+        region: 'IN',
+        sort_by: 'popularity.desc',
+        include_adult: false,
+        page: 2,
+        language: 'en-US',
+      })
+      return fallbackData.results || []
+    }
+
+    return primaryData.results || []
   }
 
-  return request(endpoint, params)
+  const params = {
+    with_genres: genreParam,
+    language: languageMap[language] || 'en-US',
+    sort_by: sort,
+    include_adult: false,
+    page: randomPage,
+  }
+
+  const data = await request(endpoint, params)
+  const filtered = (data.results || []).filter((item) => item.vote_count > 50)
+
+  console.log('Language:', language)
+  console.log('Total:', (data.results || []).length)
+  console.log('Filtered:', filtered.length)
+
+  return shuffle(filtered)
 }
 
 export async function searchMulti(query) {
@@ -68,6 +109,10 @@ export async function searchMulti(query) {
     language: 'en-US',
     page: 1,
   })
+}
+
+export async function fetchById(id, type = 'movie') {
+  return request(`/${type}/${id}`, { language: 'en-US' })
 }
 
 export async function fetchDetails(type, id) {
