@@ -115,6 +115,21 @@ export async function fetchById(id, type = 'movie') {
   return request(`/${type}/${id}`, { language: 'en-US' })
 }
 
+export async function getDetails(id, type = 'movie') {
+  return request(`/${type}/${id}`, {
+    language: 'en-US',
+    append_to_response: 'videos,credits,watch/providers',
+  })
+}
+
+export async function getSeasonDetails(tvId, seasonNumber) {
+  const data = await request(`/tv/${tvId}/season/${seasonNumber}`, {
+    language: 'en-US',
+  })
+  console.log('Season:', seasonNumber, 'Episodes:', data.episodes?.length || 0)
+  return data
+}
+
 export async function fetchDetails(type, id) {
   return request(`/${type}/${id}`, { language: 'en-US' })
 }
