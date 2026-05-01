@@ -33,10 +33,10 @@ function Home() {
   const [loadingRows, setLoadingRows] = useState(INITIAL_LOADING)
   const [rowErrors, setRowErrors] = useState(INITIAL_ERRORS)
   const [devPicks, setDevPicks] = useState([])
-  const [extraHindiComedy, setExtraHindiComedy] = useState([])
-  const [extraHindiPopular, setExtraHindiPopular] = useState([])
-  const [activeGenres, setActiveGenres] = useState(['crime'])
+  const [extraHindi, setExtraHindi] = useState([])
+  const [activeGenre, setActiveGenre] = useState('crime')
   const [currentMood, setCurrentMood] = useState('drama')
+  const [marvelShows, setMarvelShows] = useState([])
 
   const dedupeById = (items) => {
     const unique = []
@@ -120,14 +120,14 @@ function Home() {
     const primaryMood = detectedGenres[0] || 'drama'
     console.log('[MoodCinema] Mood input:', text)
     console.log('[MoodCinema] Detected genre:', detectedGenres)
-    setActiveGenres(detectedGenres)
+    setActiveGenre(primaryMood)
     setCurrentMood(primaryMood)
-    loadRows(detectedGenres)
+    loadRows([primaryMood])
   }
 
   useEffect(() => {
     const timerId = setTimeout(() => {
-      setActiveGenres(['crime'])
+      setActiveGenre('crime')
       setCurrentMood('crime')
       loadRows(['crime'])
     }, 0)
@@ -195,19 +195,48 @@ function Home() {
         console.log('[MoodCinema] Hindi curated fetched:', mergedExtras.length)
 
         if (!ignore) {
-          setExtraHindiComedy(resolvedComedy)
-          setExtraHindiPopular(resolvedPopular)
+          setExtraHindi(mergedExtras)
         }
       } catch (error) {
         console.error('[MoodCinema] Hindi curated picks load failed:', error)
         if (!ignore) {
-          setExtraHindiComedy([])
-          setExtraHindiPopular([])
+          setExtraHindi([])
         }
       }
     }
 
     loadHindiExtras()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function loadMarvelShows() {
+      try {
+        const marvelTvIds = [85271, 88396, 88329, 92749] // WandaVision, Falcon/Winter Soldier, Hawkeye, Moon Knight
+        const results = await Promise.allSettled(
+          marvelTvIds.map((tvId) => fetchById(tvId, 'tv')),
+        )
+        const valid = results
+          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
+          .map((entry) => ({ ...entry.value, media_type: 'tv' }))
+
+        if (!ignore) {
+          setMarvelShows(valid)
+        }
+      } catch (error) {
+        console.error('[MoodCinema] Marvel shows load failed:', error)
+        if (!ignore) {
+          setMarvelShows([])
+        }
+      }
+    }
+
+    loadMarvelShows()
 
     return () => {
       ignore = true
@@ -223,24 +252,31 @@ function Home() {
     ...rows.hiTv.map((m) => m.id),
   ])
   const uniqueDevPicks = devPicks.filter((item) => !existingIds.has(item.id))
-  const genreSet = new Set(activeGenres)
-  let moodHindiExtras = []
-  if (genreSet.has('comedy') || genreSet.has('feel-good')) {
-    moodHindiExtras = [...extraHindiComedy, ...extraHindiPopular.slice(0, 2)]
-  } else if (genreSet.has('drama') || genreSet.has('romance')) {
-    moodHindiExtras = [...extraHindiPopular, ...extraHindiComedy.slice(0, 2)]
-  } else if (
-    genreSet.has('action') ||
-    genreSet.has('thriller') ||
-    genreSet.has('crime') ||
-    genreSet.has('superhero')
-  ) {
-    moodHindiExtras = [...extraHindiPopular]
+  const moodGenreToTmdb = {
+    comedy: [35],
+    romance: [10749, 18],
+    thriller: [53],
+    action: [28],
+    crime: [80, 53],
+    horror: [27, 53],
+    drama: [18],
+    'sci-fi': [878, 28],
+    superhero: [28, 878],
   }
 
-  const combinedHindi = [...moodHindiExtras, ...rows.hiMovies]
+  const allowedHindiGenres = moodGenreToTmdb[activeGenre] || [18]
+  const curatedHindiByMood = extraHindi.filter((movie) => {
+    const genreIds = movie.genre_ids || []
+    return allowedHindiGenres.some((genreId) => genreIds.includes(genreId))
+  })
+
+  const combinedHindi = [...rows.hiMovies, ...curatedHindiByMood]
   const uniqueHindi = dedupeById(combinedHindi)
   const finalHindiMovies = uniqueHindi.slice(0, 20)
+  const finalEnglishTv =
+    activeGenre === 'superhero'
+      ? dedupeById([...marvelShows, ...rows.enTv])
+      : rows.enTv
   const featuredTitle = featured?.title || featured?.name || 'MoodCinema Picks'
   const featuredOverview =
     featured?.overview || 'Discover curated titles picked based on your mood.'
@@ -280,7 +316,7 @@ function Home() {
       />
       <MovieRow
         title="English TV Shows"
-        items={rows.enTv}
+        items={finalEnglishTv}
         loading={loadingRows.enTv}
         error={rowErrors.enTv}
       />

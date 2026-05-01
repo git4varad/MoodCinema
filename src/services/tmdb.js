@@ -55,30 +55,19 @@ export async function fetchMoviesByGenre(
   console.log('Sort:', sort)
 
   if (language === 'hi') {
-    const primaryData = await request(endpoint, {
+    const randomHindiPage = Math.floor(Math.random() * 5) + 1
+    console.log('Random Hindi Page:', randomHindiPage)
+
+    const data = await request(endpoint, {
       with_genres: genreParam,
       with_original_language: 'hi',
       region: 'IN',
       sort_by: 'popularity.desc',
       include_adult: false,
-      page: 1,
+      page: randomHindiPage,
       language: 'en-US',
     })
-
-    if (!primaryData.results || primaryData.results.length === 0) {
-      const fallbackData = await request(endpoint, {
-        with_genres: genreParam,
-        with_original_language: 'hi',
-        region: 'IN',
-        sort_by: 'popularity.desc',
-        include_adult: false,
-        page: 2,
-        language: 'en-US',
-      })
-      return fallbackData.results || []
-    }
-
-    return primaryData.results || []
+    return shuffle(data.results || [])
   }
 
   const params = {
