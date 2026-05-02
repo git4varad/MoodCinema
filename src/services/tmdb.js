@@ -70,6 +70,34 @@ export async function fetchMoviesByGenre(
     return shuffle(data.results || [])
   }
 
+  if (language === 'en') {
+    const page = Math.floor(Math.random() * 10) + 1
+
+    if (type === 'movie') {
+      const data = await request(endpoint, {
+        with_genres: genreParam,
+        with_original_language: 'en',
+        sort_by: 'popularity.desc',
+        include_adult: false,
+        page,
+        language: 'en-US',
+      })
+      const filtered = (data.results || []).filter((item) => (item.vote_count ?? 0) > 40)
+      return shuffle(filtered)
+    }
+
+    const data = await request(endpoint, {
+      with_genres: genreParam,
+      with_original_language: 'en',
+      sort_by: 'popularity.desc',
+      include_adult: false,
+      page: Math.floor(Math.random() * 5) + 1,
+      language: 'en-US',
+    })
+    const filtered = (data.results || []).filter((item) => (item.vote_count ?? 0) > 40)
+    return shuffle(filtered)
+  }
+
   const params = {
     with_genres: genreParam,
     language: languageMap[language] || 'en-US',
