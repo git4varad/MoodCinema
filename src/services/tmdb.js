@@ -100,8 +100,95 @@ export async function searchMulti(query) {
   })
 }
 
+/**
+ * Discover movies for a single genre + optional original language (null = no language filter).
+ * Use distinct sort/page per row so regional catalogs don't show identical strips.
+ */
+export async function fetchByLanguageAndGenre(genreId, langCode, options = {}) {
+  const id = Array.isArray(genreId) ? genreId[0] : genreId
+  const page = options.page ?? 1
+  const sortBy = options.sortBy ?? 'popularity.desc'
+
+  const params = {
+    with_genres: String(id),
+    sort_by: sortBy,
+    include_adult: false,
+    page,
+    language: 'en-US',
+  }
+
+  if (langCode) {
+    params.with_original_language = langCode
+  }
+
+  if (langCode && ['hi', 'te', 'ta', 'kn'].includes(langCode)) {
+    params.region = 'IN'
+    // Only titles that have already been released (theatrical/streaming date in the past)
+    params['primary_release_date.lte'] = new Date().toISOString().slice(0, 10)
+  }
+
+  const data = await request('/discover/movie', params)
+  return (data.results || []).map((m) => ({ ...m, media_type: 'movie' }))
+}
+
+/** TV series by original language (Korea, Japan, Spain, etc.) for curated browse. */
+export async function fetchDiscoverTVByOriginalLanguage(langCode, options = {}) {
+  const page = options.page ?? 1
+  const data = await request('/discover/tv', {
+    with_original_language: langCode,
+    sort_by: options.sortBy ?? 'popularity.desc',
+    include_adult: false,
+    page,
+    language: 'en-US',
+  })
+  return (data.results || []).map((t) => ({ ...t, media_type: 'tv' }))
+}
+
+/** Movies by original language (Korea, Japan, Spanish, etc.) for Global Hits browse. */
+export async function fetchDiscoverMovieByOriginalLanguage(langCode, options = {}) {
+  const page = options.page ?? 1
+  const today = new Date().toISOString().slice(0, 10)
+  const data = await request('/discover/movie', {
+    with_original_language: langCode,
+    sort_by: options.sortBy ?? 'popularity.desc',
+    include_adult: false,
+    page,
+    language: 'en-US',
+    'primary_release_date.lte': today,
+  })
+  return (data.results || []).map((m) => ({ ...m, media_type: 'movie' }))
+}
+
+/**
+ * Popular movies or TV in a single genre (for broadened search, etc.).
+ */
+export async function discoverPopularByGenre(mediaType, genreId, options = {}) {
+  const page = options.page ?? 1
+  const endpoint = mediaType === 'tv' ? '/discover/tv' : '/discover/movie'
+  const data = await request(endpoint, {
+    with_genres: String(genreId),
+    sort_by: 'popularity.desc',
+    include_adult: false,
+    page,
+    language: 'en-US',
+  })
+  const rows = data.results || []
+  const limited = options.limit != null ? rows.slice(0, options.limit) : rows
+  return limited.map((item) => ({ ...item, media_type: mediaType }))
+}
+
 export async function fetchById(id, type = 'movie') {
   return request(`/${type}/${id}`, { language: 'en-US' })
+}
+
+/** Same as fetchById but returns null on missing/404 so batch loads don't fail. */
+export async function fetchByIdSafe(id, type = 'movie') {
+  try {
+    const data = await fetchById(id, type)
+    return data?.id ? data : null
+  } catch {
+    return null
+  }
 }
 
 export async function getDetails(id, type = 'movie') {

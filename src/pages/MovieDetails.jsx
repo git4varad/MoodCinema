@@ -1,12 +1,42 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { getDetails, getSeasonDetails } from '../services/tmdb'
 
 const IMAGE_BASE = 'https://image.tmdb.org/t/p/w500'
 const PROFILE_BASE = 'https://image.tmdb.org/t/p/w200'
 
+function BackIconButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Go back"
+      className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800/90 text-white shadow-lg ring-1 ring-white/10 transition hover:bg-neutral-700 hover:text-gray-200"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        className="h-6 w-6"
+        aria-hidden
+      >
+        <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+      </svg>
+    </button>
+  )
+}
+
 function MovieDetails() {
+  const navigate = useNavigate()
   const { type, id } = useParams()
+
+  const goBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1)
+    } else {
+      navigate('/')
+    }
+  }
   const [details, setDetails] = useState(null)
   const [seasonData, setSeasonData] = useState(null)
   const [selectedSeason, setSelectedSeason] = useState(1)
@@ -94,15 +124,26 @@ function MovieDetails() {
   }, [details, seasonData, expectedEpisodeCount, validEpisodes.length, selectedSeason])
 
   if (loading) {
-    return <main className="px-4 py-10 text-neutral-300">Loading details...</main>
+    return (
+      <main className="mx-auto w-full max-w-6xl px-4 py-8">
+        <BackIconButton onClick={goBack} />
+        <p className="text-neutral-300">Loading details...</p>
+      </main>
+    )
   }
 
   if (error || !details) {
-    return <main className="px-4 py-10 text-red-400">{error || 'No details found.'}</main>
+    return (
+      <main className="mx-auto w-full max-w-6xl px-4 py-8">
+        <BackIconButton onClick={goBack} />
+        <p className="text-red-400">{error || 'No details found.'}</p>
+      </main>
+    )
   }
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <BackIconButton onClick={goBack} />
       {details.backdrop_path ? (
         <img
           src={`${IMAGE_BASE.replace('/w500', '/original')}${details.backdrop_path}`}

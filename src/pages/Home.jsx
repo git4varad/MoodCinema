@@ -1,245 +1,71 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import LanguageRow from '../components/LanguageRow'
 import MoodInput from '../components/MoodInput'
 import MovieRow from '../components/MovieRow'
-import { moodDevPicks } from '../services/devPicks'
-import { GENRE_MAP } from '../services/genres'
-import { hindiComedyIds, hindiPopularIds } from '../services/hindiPicks'
-import { detectMoodToGenre } from '../services/mood'
-import { fetchById, fetchMoviesByGenre } from '../services/tmdb'
+import { useHomeBrowse } from '../context/HomeBrowseContext'
+import { devMovies, devTV } from '../services/devCorner'
+import { fetchById } from '../services/tmdb'
 
-const INITIAL_ROWS = {
-  enMovies: [],
-  enTv: [],
-  hiMovies: [],
-  hiTv: [],
-}
-
-const INITIAL_LOADING = {
-  enMovies: false,
-  enTv: false,
-  hiMovies: false,
-  hiTv: false,
-}
-
-const INITIAL_ERRORS = {
-  enMovies: '',
-  enTv: '',
-  hiMovies: '',
-  hiTv: '',
+function dedupeById(items) {
+  const unique = []
+  const seen = new Set()
+  for (const movie of items) {
+    if (!seen.has(movie.id)) {
+      seen.add(movie.id)
+      unique.push(movie)
+    }
+  }
+  return unique
 }
 
 function Home() {
-  const [rows, setRows] = useState(INITIAL_ROWS)
-  const [loadingRows, setLoadingRows] = useState(INITIAL_LOADING)
-  const [rowErrors, setRowErrors] = useState(INITIAL_ERRORS)
-  const [devPicks, setDevPicks] = useState([])
-  const [extraHindi, setExtraHindi] = useState([])
-  const [activeGenre, setActiveGenre] = useState('crime')
-  const [currentMood, setCurrentMood] = useState('drama')
-  const [marvelShows, setMarvelShows] = useState([])
+  const {
+    rows,
+    loadingRows,
+    rowErrors,
+    extraHindi,
+    activeGenre,
+    marvelShows,
+    handleMoodSearch,
+  } = useHomeBrowse()
 
-  const dedupeById = (items) => {
-    const unique = []
-    const seen = new Set()
-
-    for (const movie of items) {
-      if (!seen.has(movie.id)) {
-        seen.add(movie.id)
-        unique.push(movie)
-      }
-    }
-
-    return unique
-  }
-
-  const loadRows = useCallback(async (genresInput) => {
-    const genres = Array.isArray(genresInput) ? genresInput : [genresInput]
-    console.log('Selected Genres:', genres)
-
-    setLoadingRows({
-      enMovies: true,
-      enTv: true,
-      hiMovies: true,
-      hiTv: true,
-    })
-    setRowErrors(INITIAL_ERRORS)
-
-    const getGenreIdsByType = (mediaType) => {
-      const ids = genres.flatMap((genre) => {
-        const typeSpecificKey = `${genre}_${mediaType}`
-        const mapped =
-          GENRE_MAP[typeSpecificKey] !== undefined
-            ? GENRE_MAP[typeSpecificKey]
-            : GENRE_MAP[genre]
-
-        if (mapped === undefined) return []
-        return Array.isArray(mapped) ? mapped : [mapped]
-      })
-
-      const unique = [...new Set(ids)]
-      return unique.length > 0 ? unique : [GENRE_MAP.drama]
-    }
-
-    const fetchForRow = async (type, language) => {
-      const genreIds = getGenreIdsByType(type)
-      console.log(`Genre IDs (${type}/${language}):`, genreIds)
-      const results = await Promise.all(
-        genreIds.map((genreId) => fetchMoviesByGenre(genreId, type, language)),
-      )
-      const combined = results.flat()
-      return dedupeById(combined)
-    }
-
-    const [enMovies, enTv, hiMovies, hiTv] = await Promise.allSettled([
-      fetchForRow('movie', 'en'),
-      fetchForRow('tv', 'en'),
-      fetchForRow('movie', 'hi'),
-      fetchForRow('tv', 'hi'),
-    ])
-
-    setRows({
-      enMovies: enMovies.status === 'fulfilled' ? enMovies.value : [],
-      enTv: enTv.status === 'fulfilled' ? enTv.value : [],
-      hiMovies: hiMovies.status === 'fulfilled' ? hiMovies.value : [],
-      hiTv: hiTv.status === 'fulfilled' ? hiTv.value : [],
-    })
-
-    setRowErrors({
-      enMovies:
-        enMovies.status === 'rejected' ? 'Could not load English movies.' : '',
-      enTv: enTv.status === 'rejected' ? 'Could not load English TV shows.' : '',
-      hiMovies: hiMovies.status === 'rejected' ? 'Could not load Hindi movies.' : '',
-      hiTv: hiTv.status === 'rejected' ? 'Could not load Hindi web series.' : '',
-    })
-
-    setLoadingRows(INITIAL_LOADING)
-  }, [])
-
-  const handleMoodSearch = (text) => {
-    const detectedGenres = detectMoodToGenre(text)
-    const primaryMood = detectedGenres[0] || 'drama'
-    console.log('[MoodCinema] Mood input:', text)
-    console.log('[MoodCinema] Detected genre:', detectedGenres)
-    setActiveGenre(primaryMood)
-    setCurrentMood(primaryMood)
-    loadRows([primaryMood])
-  }
+  const [devCorner, setDevCorner] = useState([])
+  const [devCornerLoading, setDevCornerLoading] = useState(true)
+  const [devCornerError, setDevCornerError] = useState('')
 
   useEffect(() => {
-    const timerId = setTimeout(() => {
-      setActiveGenre('crime')
-      setCurrentMood('crime')
-      loadRows(['crime'])
-    }, 0)
+    let cancelled = false
 
-    return () => clearTimeout(timerId)
-  }, [loadRows])
-
-  useEffect(() => {
-    let ignore = false
-
-    async function loadDevPicks() {
-      if (!currentMood) return
-
+    async function loadDevCorner() {
+      setDevCornerLoading(true)
+      setDevCornerError('')
       try {
-        const picks = moodDevPicks[currentMood] || moodDevPicks.drama
-        if (!picks) return
-
-        const movies = await Promise.all(
-          picks.movies.map((id) => fetchById(id, 'movie')),
+        const movieResults = await Promise.all(
+          devMovies.map((id) => fetchById(id, 'movie')),
         )
-        const tv = await Promise.all(picks.tv.map((id) => fetchById(id, 'tv')))
-
-        if (!ignore) {
-          const combined = [
-            ...movies.map((item) => ({ ...item, media_type: 'movie' })),
-            ...tv.map((item) => ({ ...item, media_type: 'tv' })),
-          ]
-          setDevPicks(combined)
+        const tvResults = await Promise.all(devTV.map((id) => fetchById(id, 'tv')))
+        const movies = movieResults
+          .filter((item) => item?.id)
+          .map((m) => ({ ...m, media_type: 'movie' }))
+        const tv = tvResults
+          .filter((item) => item?.id)
+          .map((t) => ({ ...t, media_type: 'tv' }))
+        if (!cancelled) {
+          setDevCorner([...movies, ...tv])
         }
-      } catch (error) {
-        console.error('[MoodCinema] Dev picks load failed:', error)
-        if (!ignore) {
-          setDevPicks([])
+      } catch (err) {
+        if (!cancelled) {
+          setDevCornerError(err.message || 'Could not load Developer Corner.')
+          setDevCorner([])
         }
+      } finally {
+        if (!cancelled) setDevCornerLoading(false)
       }
     }
 
-    loadDevPicks()
-
+    loadDevCorner()
     return () => {
-      ignore = true
-    }
-  }, [currentMood])
-
-  useEffect(() => {
-    let ignore = false
-
-    async function loadHindiExtras() {
-      try {
-        const comedy = await Promise.allSettled(
-          hindiComedyIds.map((id) => fetchById(id, 'movie')),
-        )
-        const popular = await Promise.allSettled(
-          hindiPopularIds.map((id) => fetchById(id, 'movie')),
-        )
-
-        const resolvedComedy = comedy
-          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
-          .map((entry) => ({ ...entry.value, media_type: 'movie' }))
-        const resolvedPopular = popular
-          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
-          .map((entry) => ({ ...entry.value, media_type: 'movie' }))
-
-        const mergedExtras = [...resolvedComedy, ...resolvedPopular]
-        console.log('[MoodCinema] Hindi curated fetched:', mergedExtras.length)
-
-        if (!ignore) {
-          setExtraHindi(mergedExtras)
-        }
-      } catch (error) {
-        console.error('[MoodCinema] Hindi curated picks load failed:', error)
-        if (!ignore) {
-          setExtraHindi([])
-        }
-      }
-    }
-
-    loadHindiExtras()
-
-    return () => {
-      ignore = true
-    }
-  }, [])
-
-  useEffect(() => {
-    let ignore = false
-
-    async function loadMarvelShows() {
-      try {
-        const marvelTvIds = [85271, 88396, 88329, 92749] // WandaVision, Falcon/Winter Soldier, Hawkeye, Moon Knight
-        const results = await Promise.allSettled(
-          marvelTvIds.map((tvId) => fetchById(tvId, 'tv')),
-        )
-        const valid = results
-          .filter((entry) => entry.status === 'fulfilled' && entry.value?.id)
-          .map((entry) => ({ ...entry.value, media_type: 'tv' }))
-
-        if (!ignore) {
-          setMarvelShows(valid)
-        }
-      } catch (error) {
-        console.error('[MoodCinema] Marvel shows load failed:', error)
-        if (!ignore) {
-          setMarvelShows([])
-        }
-      }
-    }
-
-    loadMarvelShows()
-
-    return () => {
-      ignore = true
+      cancelled = true
     }
   }, [])
 
@@ -251,7 +77,7 @@ function Home() {
     ...rows.hiMovies.map((m) => m.id),
     ...rows.hiTv.map((m) => m.id),
   ])
-  const uniqueDevPicks = devPicks.filter((item) => !existingIds.has(item.id))
+  const uniqueDevCorner = devCorner.filter((item) => !existingIds.has(item.id))
   const moodGenreToTmdb = {
     comedy: [35],
     romance: [10749, 18],
@@ -320,6 +146,7 @@ function Home() {
         loading={loadingRows.enTv}
         error={rowErrors.enTv}
       />
+      <LanguageRow />
       <MovieRow
         title="Hindi Movies"
         items={finalHindiMovies}
@@ -332,14 +159,16 @@ function Home() {
         loading={loadingRows.hiTv}
         error={rowErrors.hiTv}
       />
-      <section>
+      <section className="mt-10 border-t border-gray-800 pt-4">
         <MovieRow
-          title="⭐ Developer Picks for You"
-          items={uniqueDevPicks}
-          loading={false}
-          error=""
+          title="🔥 Developer Corner"
+          items={uniqueDevCorner}
+          loading={devCornerLoading}
+          error={devCornerError}
         />
-        <p className="px-6 text-sm text-gray-400">Curated based on your mood</p>
+        <p className="px-6 text-sm text-gray-400">
+          Marvel, Investigation &amp; Personal Picks
+        </p>
       </section>
     </main>
   )
